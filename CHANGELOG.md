@@ -12,7 +12,7 @@ Versioning: [SemVer](https://semver.org/).
 - **5-section structured report** (Codex → Claude): Status / Files changed / Self-check / Brief mismatches / Open questions. Status is `done` / `blocked` / `partial`.
 - **Brief-declared sandbox tier.** Replaces "Claude auto-escalates per task". Three tiers:
   - `network` — **default.** workspace writes + outbound network + codex's native web_search tool. Maps to `--dangerously-bypass-approvals-and-sandbox --config tools.web_search=true`.
-  - `workspace` — explicit downgrade. workspace writes only, no network, no web_search. Maps to `--full-auto`.
+  - `workspace` — explicit downgrade. workspace writes only, no network, no web_search. Maps to `--sandbox workspace-write`.
   - `system` — anywhere on disk + network + web_search.
 - **Codex contract is split** into a Codex-facing slice (~1.5KB, between `CODEX_CONTRACT_BEGIN/END` markers) and a Claude-facing body. `scripts/codex-dispatch.sh` extracts only the contract slice and prepends it to every dispatch. Codex never sees the Claude-facing material.
 - **Mandatory verify routine.** Parse 5 report sections, spot-read changed regions, confirm self-check exit codes, surface mismatches/questions.

@@ -30,7 +30,7 @@ Codex's contract is extracted from [personas/code-writer.md](personas/code-write
 | Tier | Allows | Flag |
 |---|---|---|
 | `network` (default) | workspace writes + network + codex web_search | `--dangerously-bypass-approvals-and-sandbox --config tools.web_search=true` |
-| `workspace` | workspace writes, no network | `--full-auto` |
+| `workspace` | workspace writes, no network | `--sandbox workspace-write` |
 | `system` | anywhere + network + web_search | `--dangerously-bypass-approvals-and-sandbox` |
 
 Default is `network`. Downgrade to `workspace` only when you want to deliberately block network access.

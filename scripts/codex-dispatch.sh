@@ -18,7 +18,7 @@
 #   --tier <tier>        network | workspace | system   (default: network)
 #                        Maps to:
 #                          network   -> --dangerously-bypass-approvals-and-sandbox
-#                          workspace -> --full-auto
+#                          workspace -> --sandbox workspace-write
 #                          system    -> --dangerously-bypass-approvals-and-sandbox
 #                        Default is `network` because it's the most common case
 #                        (code writing + dep installs + research). Tighten to
@@ -107,7 +107,7 @@ fi
 case "$TIER" in
   network)   SANDBOX_FLAGS=(--dangerously-bypass-approvals-and-sandbox)
              WEB_SEARCH=1 ;;
-  workspace) SANDBOX_FLAGS=(--full-auto)
+  workspace) SANDBOX_FLAGS=(--sandbox workspace-write)
              WEB_SEARCH=0 ;;
   system)    SANDBOX_FLAGS=(--dangerously-bypass-approvals-and-sandbox)
              WEB_SEARCH=1 ;;

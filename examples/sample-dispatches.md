@@ -7,7 +7,7 @@ Tier → flag mapping:
 | Tier | Flag |
 |---|---|
 | `network` (default) | `--dangerously-bypass-approvals-and-sandbox --config tools.web_search=true` |
-| `workspace` | `--full-auto` |
+| `workspace` | `--sandbox workspace-write` |
 | `system` | `--dangerously-bypass-approvals-and-sandbox` |
 
 Full contract in [../personas/code-writer.md](../personas/code-writer.md).
@@ -117,7 +117,7 @@ Pure mechanical work, no network needed. Downgrade `workspace` blocks outbound c
 
 ```bash
 filename=$(openssl rand -hex 4)
-codex exec --skip-git-repo-check --full-auto -C /path/to/repo \
+codex exec --skip-git-repo-check --sandbox workspace-write -C /path/to/repo \
   --config model_reasoning_effort="medium" \
   2>>"/tmp/codex-${filename}.log" <<'EOF'
 ## Task

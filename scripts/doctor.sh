@@ -47,7 +47,7 @@ section "2. Required flags on this codex build"
 # Test each flag by running `codex exec --help` and grepping
 if command -v codex >/dev/null 2>&1; then
   HELP_OUT="$(codex exec --help 2>&1 || true)"
-  for flag in "--skip-git-repo-check" "--full-auto" "--dangerously-bypass-approvals-and-sandbox" "-C" "--cd" "-p" "--profile" "--config"; do
+  for flag in "--skip-git-repo-check" "--sandbox" "--dangerously-bypass-approvals-and-sandbox" "-C" "--cd" "-p" "--profile" "--config"; do
     if echo "$HELP_OUT" | grep -q -- "$flag"; then
       check "$flag supported" pass
     else

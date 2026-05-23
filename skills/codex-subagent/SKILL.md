@@ -67,7 +67,7 @@ The report-format field carries the full schema as literal text — see [persona
 | Tier | What it allows | Codex flag |
 |---|---|---|
 | `network` (default) | workspace writes + outbound network + codex's web_search | `--dangerously-bypass-approvals-and-sandbox --config tools.web_search=true` |
-| `workspace` | workspace writes, no network, no web_search | `--full-auto` |
+| `workspace` | workspace writes, no network, no web_search | `--sandbox workspace-write` |
 | `system` | anywhere on disk + network + web_search | `--dangerously-bypass-approvals-and-sandbox` |
 
 Default = `network`. Pick `workspace` only when you want to deliberately block network. `system` is rare; reserve for cross-project briefs.
@@ -196,7 +196,7 @@ Mechanical, every time:
 - Codex asked a question, short answer → resume.
 - Session went off the rails → fresh.
 
-Resume syntax (prompt via stdin, no `--full-auto`/`--config`/`-p`):
+Resume syntax (prompt via stdin, no `--sandbox`/`--config`/`-p`):
 
 ```bash
 echo "<follow-up>" | codex exec --skip-git-repo-check resume --last \
