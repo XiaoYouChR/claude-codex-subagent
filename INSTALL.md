@@ -81,19 +81,20 @@ Then restart Claude Code so the skill index loads, and run the 30-second smoke t
 
 ### 30-second smoke test
 
-Open a fresh Claude Code conversation and ask:
+Open a fresh Claude Code conversation inside any test repo and ask:
 
 ```
-用 codex 查一下 bun 的最新穩定版本,只回一行
+用 codex 实现一下:在 README.md 末尾添加一行 "Smoke test ok."
+不要改动其他内容。
 ```
 
 Expected behavior:
 
-1. Claude announces the dispatch in one line, mentioning the sandbox choice (should be `--dangerously-bypass-approvals-and-sandbox` because the task needs network).
-2. You see Claude run a Bash call to `codex exec`.
-3. After 10–30 seconds, Claude comes back with a single line like `bun 1.2.4 released 2026-03-28`.
+1. Claude announces the dispatch in one line, mentioning sandbox tier (`workspace`) and effort (`default`).
+2. You see Claude run a Bash call to `codex exec` with a heredoc brief.
+3. After a few seconds, Codex returns a structured report. Claude does a quick spot-read on README.md and summarizes: "Codex returned done. Added the line; spot-read confirmed. Self-check (`grep -q "Smoke test ok." README.md`) exited 0."
 
-If Claude **doesn't dispatch** and instead tries to WebSearch / WebFetch itself: the skill didn't trigger. Check that the skill file is actually at `~/.claude/skills/codex-subagent/SKILL.md` and that Claude Code was restarted after install.
+If Claude **doesn't dispatch** and instead just runs `Edit` itself: the skill didn't trigger. Check that the skill file is actually at `~/.claude/skills/codex-subagent/SKILL.md` and that Claude Code was restarted after install.
 
 If Claude dispatches but the call fails: re-run the command Claude showed in your own terminal (without the `2>>` redirect) to see the raw error, then check the troubleshooting section below.
 

@@ -99,15 +99,30 @@ else
   check "SKILL.md installed at $SKILL_PATH" fail "run: cp -r skills/codex-subagent ~/.claude/skills/"
 fi
 
-section "5. Personas (optional)"
+section "5. Personas + dispatch script"
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PERSONA_DIR="$SCRIPT_DIR/../personas"
 if [[ -d "$PERSONA_DIR" ]]; then
-  PERSONA_COUNT=$(find "$PERSONA_DIR" -maxdepth 1 -name '*.md' -not -name 'README.md' 2>/dev/null | wc -l)
-  check "personas/ directory ($PERSONA_COUNT persona files)" pass
+  if [[ -f "$PERSONA_DIR/code-writer.md" ]]; then
+    check "personas/code-writer.md present (the sanctioned persona)" pass
+  else
+    check "personas/code-writer.md present" fail "missing — this fork ships exactly one persona; reinstall from repo"
+  fi
 else
-  check "personas/ directory" warn "not found — personas are optional"
+  check "personas/ directory" fail "not found — reinstall the skill"
+fi
+
+DISPATCH="$SCRIPT_DIR/codex-dispatch.sh"
+if [[ -f "$DISPATCH" ]] && [[ -x "$DISPATCH" ]]; then
+  check "codex-dispatch.sh exists and is executable" pass
+  if "$DISPATCH" --debug "smoke test task" </dev/null >/dev/null 2>&1; then
+    check "codex-dispatch.sh --debug (default tier=network) runs cleanly" pass
+  else
+    check "codex-dispatch.sh --debug runs cleanly" warn "debug invocation returned non-zero; inspect with: $DISPATCH --debug 'task'"
+  fi
+else
+  check "codex-dispatch.sh exists and is executable" warn "missing or not executable — direct CLI dispatch will not work"
 fi
 
 # --- summary ---

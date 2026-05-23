@@ -1,245 +1,258 @@
-# Sample dispatches
+# Sample briefs
 
-Real-world patterns for delegating to Codex. Copy, adapt, or just read them to get a feel for how the skill wants to be used.
+5 brief shapes for code-writing dispatches. Copy, adapt.
 
-Every example uses the canonical invocation shape:
+Tier → flag mapping:
+
+| Tier | Flag |
+|---|---|
+| `network` (default) | `--dangerously-bypass-approvals-and-sandbox --config tools.web_search=true` |
+| `workspace` | `--full-auto` |
+| `system` | `--dangerously-bypass-approvals-and-sandbox` |
+
+Full contract in [../personas/code-writer.md](../personas/code-writer.md).
+
+---
+
+## 1. New feature — add an API parameter
 
 ```bash
 filename=$(openssl rand -hex 4)
-codex exec --skip-git-repo-check <sandbox-flags> [other flags] \
+codex exec --skip-git-repo-check --dangerously-bypass-approvals-and-sandbox \
+  --config tools.web_search=true -C /path/to/repo \
   2>>"/tmp/codex-${filename}.log" <<'EOF'
-<prompt>
+## Task
+Add a `since` query parameter to GET /api/items. ISO-8601 date; filters items where created_at >= since. Malformed input returns 400 with body identifying the bad field.
+
+## Scope / files in play
+- src/api/items.ts
+- tests/api/items.test.ts
+Do not modify anything outside this list.
+
+## Sandbox tier
+network
+
+## Constraints
+- No new dependencies.
+- Validation uses the existing zod pattern from neighbouring handlers.
+- 400 body shape: { error: "invalid_param", field: "since" }.
+
+## Non-goals
+- Do not touch limit/offset params.
+- Do not refactor the route handler.
+
+## Acceptance criteria
+- Valid `since` filters correctly.
+- Malformed `since` returns 400 with the specified body.
+- New test in items.test.ts covers both branches.
+- All existing tests still pass.
+
+## Self-check (run before reporting)
+- pnpm test tests/api/items.test.ts
+- pnpm typecheck
+
+## Report format
+Emit exactly these 5 sections, nothing outside:
+
+## Status
+done | blocked | partial
+
+## Files changed
+- <path> (+<added> / -<removed>)
+
+## Self-check
+- `<command>` → exit <code>
+  <2-5 line excerpt>
+
+## Brief mismatches
+(none) — or — <item>
+
+## Open questions
+(none) — or — <item>
 EOF
 ```
 
 ---
 
-## 1. Web lookup — "what's the current version of X"
-
-**Why delegate:** WebSearch + WebFetch in Claude costs real tokens for what is ultimately a one-line answer. Codex does the fetching in its own context and returns the one line.
-
-**Sandbox:** `--dangerously-bypass-approvals-and-sandbox` (network needed)
+## 2. Bug fix — narrow root cause
 
 ```bash
 filename=$(openssl rand -hex 4)
-codex exec --skip-git-repo-check \
-  --dangerously-bypass-approvals-and-sandbox \
+codex exec --skip-git-repo-check --dangerously-bypass-approvals-and-sandbox \
+  --config tools.web_search=true -C /path/to/repo \
   2>>"/tmp/codex-${filename}.log" <<'EOF'
-Search the web for the current stable version of Bun (as of today).
-Check bun.sh and the GitHub releases page at https://github.com/oven-sh/bun/releases.
-Return exactly one line:
-  bun <version> released <YYYY-MM-DD>
-No other output.
-EOF
-```
+## Task
+Fix the off-by-one in src/utils/pagination.ts:computeOffset. When page=1 it returns page_size; should return 0. Page N → offset (N-1) * page_size.
 
-**Expected return:**
-```
-bun 1.2.4 released 2026-03-28
+## Scope / files in play
+- src/utils/pagination.ts
+- tests/utils/pagination.test.ts
+
+## Sandbox tier
+network
+
+## Constraints
+- Minimal diff. Formula change only.
+
+## Non-goals
+- Do not rename, refactor, or clean up the file.
+
+## Acceptance criteria
+- The currently-failing test "page 1 has offset 0" passes.
+- All other pagination tests still pass.
+
+## Self-check (run before reporting)
+- pnpm test tests/utils/pagination.test.ts
+
+## Report format
+[5-section schema, inlined as in example 1]
+EOF
 ```
 
 ---
 
-## 2. Bulk TODO audit — "which of these are stale"
+## 3. Explicit `workspace` downgrade
 
-**Why delegate:** Scanning dozens of files for TODO comments, cross-referencing git blame for each, and judging staleness would cost Claude thousands of tokens of `grep` + `blame` output. Codex runs it all internally and returns a structured table.
-
-**Sandbox:** `--full-auto` (read-only workload, no network)
-
-```bash
-filename=$(openssl rand -hex 4)
-codex exec --skip-git-repo-check --full-auto -C /path/to/your/repo \
-  --config model_reasoning_effort="high" \
-  2>>"/tmp/codex-${filename}.log" <<'EOF'
-Find every TODO/FIXME/HACK comment under src/. For each one, judge whether
-it looks stale using these rules:
-  - references a function/variable that no longer exists → stale
-  - git blame shows it's older than 1 year AND surrounding code was rewritten → stale
-  - the work described is already done elsewhere in the codebase → stale
-  - otherwise → not stale
-
-Return a markdown table, nothing else:
-| file:line | comment (truncated to 60 chars) | stale? | reason |
-
-No prose, no preamble, no summary. Just the table.
-EOF
-```
-
-**Expected return:**
-```
-| file:line | comment | stale? | reason |
-|---|---|---|---|
-| src/auth/login.ts:42 | TODO: add rate limiting | no | feature still pending |
-| src/utils/cache.ts:17 | FIXME: race condition in... | yes | code rewritten 2024, no race exists |
-...
-```
-
----
-
-## 3. Long file write — "generate a full X"
-
-**Why delegate:** A 400-line generated file costs 400 lines of Claude output tokens if Claude writes it. If Codex writes it, Claude just sees "wrote foo.py (412 lines)".
-
-**Sandbox:** `--full-auto` (write to workspace)
+Pure mechanical work, no network needed. Downgrade `workspace` blocks outbound calls as defence in depth.
 
 ```bash
 filename=$(openssl rand -hex 4)
 codex exec --skip-git-repo-check --full-auto -C /path/to/repo \
+  --config model_reasoning_effort="medium" \
   2>>"/tmp/codex-${filename}.log" <<'EOF'
-Generate a Python module at src/schemas/user.py with:
-  - a Pydantic v2 BaseModel called User
-  - fields: id (UUID4), email (EmailStr), name (str), created_at (datetime),
-    is_active (bool, default True), role (Enum: admin/user/viewer)
-  - a class method `from_dict(cls, data: dict) -> User` with proper type coercion
-  - a method `to_public_dict(self) -> dict` that excludes email
-  - full type hints, docstrings on the class and both methods
+## Task
+Rename `getCwd` to `getCurrentWorkingDirectory` across src/ and tests/. Code only — not comments, not docs.
 
-Match the existing code style in src/schemas/*.py if any exist.
-Write the file, then report just: "wrote src/schemas/user.py (<N> lines)".
+## Scope / files in play
+- All .ts under src/ and tests/ that reference `getCwd`.
+- Definition site: src/utils/paths.ts.
+
+## Sandbox tier
+workspace
+
+## Constraints
+- Update declaration + every call site in the same diff.
+- No formatting changes to unrelated lines.
+
+## Non-goals
+- Do not rename other identifiers.
+- Do not touch .md, .json, or comments.
+
+## Acceptance criteria
+- `grep -r "getCwd" src tests` returns nothing.
+- All existing tests pass unchanged.
+- pnpm typecheck clean.
+
+## Self-check (run before reporting)
+- pnpm typecheck
+- pnpm test
+
+## Report format
+[5-section schema, inlined]
 EOF
 ```
 
 ---
 
-## 4. Security audit — "find bugs in this"
-
-**Why delegate:** Audits are explicitly what `model_reasoning_effort="high"` is for, and the output is often "X issues found at lines A, B, C" — a small return value for a large analytical effort.
-
-**Sandbox:** `--full-auto`
+## 4. Network-required dep install
 
 ```bash
 filename=$(openssl rand -hex 4)
-codex exec --skip-git-repo-check --full-auto -C /path/to/repo \
-  --config model_reasoning_effort="high" \
+codex exec --skip-git-repo-check --dangerously-bypass-approvals-and-sandbox \
+  --config tools.web_search=true -C /path/to/repo \
   2>>"/tmp/codex-${filename}.log" <<'EOF'
-Security audit src/api/auth/. Focus on:
-  - authentication bypass
-  - session token handling (storage, expiry, invalidation)
-  - timing attacks on comparisons
-  - CSRF protection
-  - SQL injection in raw queries
-  - secrets leaked via logs or error messages
+## Task
+Add `zod` ^3.22.0 as a runtime dep. Replace the hand-rolled validator in src/api/validators/user.ts with a zod schema for the same User shape. Keep `validateUser(data: unknown): User` signature identical.
 
-For each finding, return:
-  severity (critical|high|medium|low) | file:line | issue | recommended fix
+## Scope / files in play
+- package.json
+- pnpm-lock.yaml
+- src/api/validators/user.ts
+- tests/api/validators/user.test.ts
 
-Order by severity descending. If you find no issues at a given severity,
-skip that section rather than writing "none found".
+## Sandbox tier
+network
+
+## Constraints
+- zod ^3.22.0 exactly.
+- Same signature, same error-shape contract.
+- Use .parse() (throw on invalid), not .safeParse().
+
+## Non-goals
+- Do not migrate other validators.
+- Do not change the User type.
+
+## Acceptance criteria
+- zod ^3.22.0 in package.json dependencies.
+- validators/user.ts uses zod, same exported function name.
+- Existing user.test.ts passes unchanged.
+
+## Self-check (run before reporting)
+- pnpm install
+- pnpm test tests/api/validators/user.test.ts
+- pnpm typecheck
+
+## Report format
+[5-section schema, inlined]
 EOF
 ```
 
 ---
 
-## 5. Parallel batch — analyzing N independent things
-
-**Why delegate:** Running N Codex calls in parallel via Claude Code's background task system means all N run in wall-clock parallel, and Claude only sees the N short summaries at the end.
-
-**How:** Dispatch each call with Bash `run_in_background: true`, collect task_ids, then `TaskOutput` each one.
-
-```bash
-# Call 1 — in background
-filename=$(openssl rand -hex 4)
-codex exec --skip-git-repo-check --full-auto -C /repo/service-a \
-  2>>"/tmp/codex-${filename}.log" \
-  "Report service-a's public HTTP endpoints as a list: METHOD /path - description. No prose." &
-# (Claude dispatches the other N-1 calls the same way in parallel.)
-
-# Later, collect all results via TaskOutput on each task_id.
-```
-
-In practice, Claude handles the task-id tracking — you just say "analyze all 5 services in parallel and summarize".
-
----
-
-## 6. Resume — follow-up without re-context
-
-**Why:** The original Codex session already knows the project, the files it read, and the conversation so far. Starting a fresh session for a follow-up means paying to reload all of that. Resuming is free.
+## 5. New file from spec
 
 ```bash
 filename=$(openssl rand -hex 4)
-codex exec --skip-git-repo-check resume --last \
+codex exec --skip-git-repo-check --dangerously-bypass-approvals-and-sandbox \
+  --config tools.web_search=true -C /path/to/repo \
   2>>"/tmp/codex-${filename}.log" <<'EOF'
-Follow-up: for each stale TODO you found, also check if there's a
-corresponding open issue in the GitHub tracker (search for the file
-path in issue bodies). Add a column "tracked?" to the table: yes (with
-issue #) or no.
-EOF
-```
+## Task
+Create src/schemas/user.py — Pydantic v2 BaseModel `User`.
 
-**Resume rules:**
-- Prompt goes via **stdin** (echo pipe or heredoc), not as a positional argument.
-- **Don't** re-specify `--sandbox`, `--model`, `--config`, `-p`. The session inherits from the original.
-- Use resume for refinement, "now also do X", disagreement discussions.
-- Use a fresh call for unrelated tasks or when the last session was derailed.
+Fields: id (UUID4), email (EmailStr), name (str, 1-200 chars), created_at (datetime), is_active (bool, default True), role (Enum: admin/user/viewer, default user).
 
----
+Methods:
+- classmethod from_dict(cls, data: dict) -> User (Pydantic validation)
+- to_public_dict(self) -> dict (excludes email)
 
-## 7. Disagreement — peer discussion mode
+## Scope / files in play
+- src/schemas/user.py (new)
+- src/schemas/__init__.py (add User export if pattern exists)
+- tests/schemas/test_user.py (new, 4-6 tests)
 
-**Why:** Codex can be wrong, especially about recent library versions or post-cutoff APIs. If you (Claude) have reason to believe Codex is wrong, push back explicitly rather than silently ignoring — either AI could be mistaken and the user deserves to see the discussion.
+## Sandbox tier
+network
 
-```bash
-filename=$(openssl rand -hex 4)
-codex exec --skip-git-repo-check resume --last \
-  2>>"/tmp/codex-${filename}.log" <<'EOF'
-This is Claude following up. I disagree with your claim that React 18's
-useEffect runs twice in development mode because of "hot reload". My
-understanding is that it's React 18's strict-mode intentional double-
-invocation, not hot reload — it happens even on cold starts in dev.
+## Constraints
+- Pydantic v2 syntax (model_validator, model_dump, not v1 equivalents).
+- Match existing style in src/schemas/*.py.
+- Full type hints.
 
-Can you check the React 18 docs on StrictMode and either confirm or
-correct me? If I'm right, we should update the earlier analysis.
+## Non-goals
+- Do not modify any existing schema file.
+
+## Acceptance criteria
+- src/schemas/user.py exists with the specified shape.
+- test_user.py has ≥4 tests, all pass.
+- mypy clean on the new file.
+
+## Self-check (run before reporting)
+- pytest -q tests/schemas/test_user.py
+- mypy src/schemas/user.py
+
+## Report format
+[5-section schema, inlined]
 EOF
 ```
 
 ---
 
-## 8. "I'm stuck" rescue mode
+## Properties of every good brief
 
-**Why:** When Claude's own attempt has stalled (bad assumption, wrong tool, circular reasoning), dispatching a fresh Codex session with a clean problem statement is often faster than continuing. Codex gets no context pollution.
-
-**Sandbox:** depends on the task — usually `--full-auto` for local or bypass for network.
-
-```bash
-filename=$(openssl rand -hex 4)
-codex exec --skip-git-repo-check --full-auto -C /path/to/repo \
-  --config model_reasoning_effort="high" \
-  2>>"/tmp/codex-${filename}.log" <<'EOF'
-Fresh pair of eyes needed. I'm debugging this failing test:
-
-  tests/test_user_auth.py::test_login_with_2fa FAILS with
-  AssertionError: Expected session to be active after 2FA verify
-
-I've already checked:
-  - the 2FA secret is valid (verified via pyotp directly)
-  - the test DB has the user record
-  - session.py:verify_2fa returns True
-
-But session.is_active is still False after the verify call.
-
-Please investigate from scratch — don't trust my assumptions. Look at:
-  - session.py (session state transitions)
-  - tests/test_user_auth.py (what the test actually asserts)
-  - any middleware between verify_2fa and the session object
-
-Return: the root cause in 2-3 sentences, plus the exact file:line of the bug.
-EOF
-```
-
----
-
-## Prompt-writing tips
-
-Patterns that consistently produce good Codex results:
-
-1. **State the return format explicitly.** "Return exactly one line...", "Return a markdown table with columns X, Y, Z", "No prose, no preamble". Codex is very willing to be terse if asked.
-
-2. **Scope aggressively.** "under src/auth/", "in files matching *.test.ts", "only check functions that start with handle_". Don't let Codex wander.
-
-3. **Say what NOT to do.** "Don't modify tests.", "Don't touch anything outside src/api/.", "Don't write a summary at the end."
-
-4. **Give a decision rule, not just a question.** Instead of "is this stale?", spell out the rule: "stale if git blame > 1 year AND referenced code is gone".
-
-5. **When you care about reasoning, set it high.** `--config model_reasoning_effort="high"` for audits, security, tricky debugging. Leave default for routine work.
-
-6. **Heredoc for anything multi-line.** Much less quoting pain than positional args.
+1. All 8 sections present, in order.
+2. Scope is a closed boundary.
+3. Acceptance criteria are commands-checkable, not judgment-based.
+4. Self-check is exact shell invocations.
+5. Non-goals catch scope creep up front.
+6. `network` unless you have a reason to downgrade.
+7. Report format inlined verbatim (Codex doesn't have access to the persona file).

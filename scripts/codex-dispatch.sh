@@ -1,25 +1,43 @@
 #!/usr/bin/env bash
-# codex-dispatch.sh — canonical codex exec wrapper
+# codex-dispatch.sh — canonical codex exec wrapper for the code-writer contract.
 #
-# Thin CLI wrapper around `codex exec` that applies the skill's
-# conventions automatically: --skip-git-repo-check, adaptive sandbox,
-# stderr to a random /tmp log, heredoc prompt via stdin, optional
-# persona loading.
+# Wraps `codex exec` with this fork's conventions automatically:
+# --skip-git-repo-check, brief-declared sandbox tier, stderr to a random /tmp
+# log, heredoc prompt via stdin. Defaults to the code-writer persona; if stdin
+# already looks like a brief (starts with `## Task`), it's forwarded verbatim,
+# otherwise it's wrapped in the code-writer template with stdin as the Task body.
 #
 # Usage:
-#   ./scripts/codex-dispatch.sh [OPTIONS] "<prompt>"
-#   echo "prompt" | ./scripts/codex-dispatch.sh [OPTIONS]
+#   ./scripts/codex-dispatch.sh [OPTIONS] [<task>]
+#   ./scripts/codex-dispatch.sh [OPTIONS] <<'EOF'
+#   ## Task
+#   ...full brief...
+#   EOF
 #
 # Options:
-#   --persona <name>     Load personas/<name>.md as the prompt body,
-#                        replacing {{TASK}} with the argument.
-#   --sandbox <mode>     full-auto | bypass | read-only (default: full-auto)
-#   --effort <level>     low | medium | high | default (default: default)
+#   --tier <tier>        network | workspace | system   (default: network)
+#                        Maps to:
+#                          network   -> --dangerously-bypass-approvals-and-sandbox
+#                          workspace -> --full-auto
+#                          system    -> --dangerously-bypass-approvals-and-sandbox
+#                        Default is `network` because it's the most common case
+#                        (code writing + dep installs + research). Tighten to
+#                        `workspace` only when you explicitly want to block
+#                        network access.
+#   --persona <name>     Persona file to use (default: code-writer).
+#                        Looks up personas/<name>.md in repo.
+#   --effort <level>     low | medium | high | default   (default: default)
+#                        Sets model_reasoning_effort.
 #   --cd <dir>           Set Codex working directory (-C).
 #   --profile <name>     Use a codex config profile (-p).
 #   --resume             Resume the last session instead of starting fresh.
+#                        --tier/--effort/--profile are ignored on resume
+#                        (session inherits from the original dispatch).
+#   --raw                Skip persona/template wrapping entirely; forward stdin
+#                        to codex exec verbatim. Useful for ad-hoc dispatches
+#                        that aren't briefs.
 #   --show-stderr        Print the /tmp log on exit (for debugging).
-#   --debug              Print the assembled command and exit 0.
+#   --debug              Print the assembled command and exit 0 without running.
 #   -h, --help           Show this help.
 #
 # Exit codes:
@@ -40,31 +58,33 @@ usage() {
 }
 
 # --- defaults ---
-PERSONA=""
-SANDBOX="full-auto"
+TIER="network"
+PERSONA="code-writer"
 EFFORT="default"
 CD_DIR=""
 PROFILE=""
 RESUME=0
+RAW=0
 SHOW_STDERR=0
 DEBUG=0
-PROMPT=""
+TASK_ARG=""
 
 # --- arg parsing ---
 while [[ $# -gt 0 ]]; do
   case "$1" in
+    --tier)        TIER="$2"; shift 2 ;;
     --persona)     PERSONA="$2"; shift 2 ;;
-    --sandbox)     SANDBOX="$2"; shift 2 ;;
     --effort)      EFFORT="$2"; shift 2 ;;
     --cd)          CD_DIR="$2"; shift 2 ;;
     --profile)     PROFILE="$2"; shift 2 ;;
     --resume)      RESUME=1; shift ;;
+    --raw)         RAW=1; shift ;;
     --show-stderr) SHOW_STDERR=1; shift ;;
     --debug)       DEBUG=1; shift ;;
     -h|--help)     usage 0 ;;
-    --)            shift; PROMPT="${*:-}"; break ;;
+    --)            shift; TASK_ARG="${*:-}"; break ;;
     -*)            echo "unknown option: $1" >&2; usage 1 >&2 ;;
-    *)             PROMPT="$*"; break ;;
+    *)             TASK_ARG="$*"; break ;;
   esac
 done
 
@@ -75,70 +95,90 @@ if ! command -v codex >/dev/null 2>&1; then
   exit 2
 fi
 
-# --- read prompt from stdin if not provided ---
-if [[ -z "$PROMPT" ]] && [[ ! -t 0 ]]; then
-  PROMPT="$(cat)"
+# --- read stdin if available ---
+STDIN_BODY=""
+if [[ ! -t 0 ]]; then
+  STDIN_BODY="$(cat)"
 fi
 
-# --- apply persona if set ---
-if [[ -n "$PERSONA" ]]; then
+# --- map tier to sandbox flags + web_search toggle ---
+# network and system enable codex's native web_search tool (Responses API),
+# since research is part of why those tiers exist. workspace explicitly does not.
+case "$TIER" in
+  network)   SANDBOX_FLAGS=(--dangerously-bypass-approvals-and-sandbox)
+             WEB_SEARCH=1 ;;
+  workspace) SANDBOX_FLAGS=(--full-auto)
+             WEB_SEARCH=0 ;;
+  system)    SANDBOX_FLAGS=(--dangerously-bypass-approvals-and-sandbox)
+             WEB_SEARCH=1 ;;
+  *)         echo "error: unknown tier: $TIER (want: network|workspace|system)" >&2; exit 1 ;;
+esac
+
+# --- assemble the prompt ---
+# Priority: explicit stdin > task arg. If neither, error.
+if [[ -n "$STDIN_BODY" ]]; then
+  RAW_INPUT="$STDIN_BODY"
+elif [[ -n "$TASK_ARG" ]]; then
+  RAW_INPUT="$TASK_ARG"
+else
+  echo "error: no input provided (pass via stdin or positional arg)" >&2
+  usage 1 >&2
+fi
+
+if [[ $RAW -eq 1 ]] || [[ $RESUME -eq 1 ]]; then
+  # raw + resume: forward verbatim. (resume inherits persona from the original session.)
+  PROMPT="$RAW_INPUT"
+else
+  # Extract ONLY the Codex-facing contract slice from the persona file.
+  # The rest of the persona file is Claude-facing and would just pollute
+  # Codex's context.
   SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
   PERSONA_FILE="$SCRIPT_DIR/../personas/${PERSONA}.md"
   if [[ ! -f "$PERSONA_FILE" ]]; then
     echo "error: persona file not found: $PERSONA_FILE" >&2
-    avail=""
-    for f in "$SCRIPT_DIR/../personas/"*.md; do
-      [[ -f "$f" ]] || continue
-      base="$(basename "$f" .md)"
-      [[ "$base" == "README" ]] && continue
-      avail+="$base "
-    done
-    echo "available: $avail" >&2
     exit 3
   fi
-  # strip frontmatter, substitute {{TASK}}
-  PERSONA_BODY="$(awk '/^---$/{c++; next} c>=2' "$PERSONA_FILE")"
-
-  # pull persona's recommended sandbox/effort from frontmatter if caller
-  # didn't override on the CLI (frontmatter is hint, CLI wins)
-  if [[ "$SANDBOX" == "full-auto" ]]; then
-    P_SANDBOX="$(awk '/^sandbox:/{print $2; exit}' "$PERSONA_FILE")"
-    [[ -n "$P_SANDBOX" ]] && SANDBOX="$P_SANDBOX"
-  fi
-  if [[ "$EFFORT" == "default" ]]; then
-    P_EFFORT="$(awk '/^effort:/{print $2; exit}' "$PERSONA_FILE")"
-    [[ -n "$P_EFFORT" ]] && EFFORT="$P_EFFORT"
+  CONTRACT="$(awk '/<!-- CODEX_CONTRACT_BEGIN -->/{f=1; next} /<!-- CODEX_CONTRACT_END -->/{f=0} f' "$PERSONA_FILE")"
+  if [[ -z "$CONTRACT" ]]; then
+    echo "error: $PERSONA_FILE has no CODEX_CONTRACT_BEGIN/END markers" >&2
+    exit 3
   fi
 
-  PROMPT="${PERSONA_BODY//\{\{TASK\}\}/$PROMPT}"
-fi
+  if printf '%s' "$RAW_INPUT" | grep -q '^## Task'; then
+    PROMPT="=== CONTRACT ===
+$CONTRACT
+=== TASK ===
+$RAW_INPUT"
+  else
+    PROMPT="=== CONTRACT ===
+$CONTRACT
+=== TASK ===
+The dispatcher passed only a bare task statement (sandbox tier: $TIER). Treat the line below as the Task section. Infer minimal Scope and Self-check from the task; if too ambiguous, return blocked.
 
-if [[ -z "$PROMPT" ]]; then
-  echo "error: no prompt provided (pass as argument, stdin, or use --persona)" >&2
-  usage 1 >&2
+## Task
+$RAW_INPUT"
+  fi
 fi
-
-# --- map sandbox name to codex flag(s) ---
-case "$SANDBOX" in
-  full-auto)  SANDBOX_FLAGS=(--full-auto) ;;
-  bypass)     SANDBOX_FLAGS=(--dangerously-bypass-approvals-and-sandbox) ;;
-  read-only)  SANDBOX_FLAGS=(--sandbox read-only) ;;
-  *)          echo "error: unknown sandbox: $SANDBOX (want: full-auto|bypass|read-only)" >&2; exit 1 ;;
-esac
 
 # --- build command pieces ---
 TMPDIR_="${CODEX_DISPATCH_TMPDIR:-/tmp}"
 mkdir -p "$TMPDIR_"
-LOGFILE="$TMPDIR_/codex-$(openssl rand -hex 4 2>/dev/null || date +%s%N | sha256sum | head -c 8).log"
+if command -v openssl >/dev/null 2>&1; then
+  RAND_SUFFIX="$(openssl rand -hex 4)"
+else
+  RAND_SUFFIX="$(date +%s%N | sha256sum | head -c 8)"
+fi
+LOGFILE="$TMPDIR_/codex-${RAND_SUFFIX}.log"
 
 CMD=(codex exec --skip-git-repo-check)
 if [[ $RESUME -eq 1 ]]; then
   CMD+=(resume --last)
 else
   CMD+=("${SANDBOX_FLAGS[@]}")
+  [[ "${WEB_SEARCH:-0}" -eq 1 ]] && CMD+=(--config "tools.web_search=true")
 fi
 [[ -n "$CD_DIR"  ]] && CMD+=(-C "$CD_DIR")
-[[ -n "$PROFILE" ]] && CMD+=(-p "$PROFILE")
+[[ -n "$PROFILE" ]] && [[ $RESUME -eq 0 ]] && CMD+=(-p "$PROFILE")
 if [[ "$EFFORT" != "default" ]] && [[ $RESUME -eq 0 ]]; then
   CMD+=(--config "model_reasoning_effort=\"$EFFORT\"")
 fi
@@ -149,20 +189,14 @@ if [[ $DEBUG -eq 1 ]]; then
   printf '  %q ' "${CMD[@]}"
   echo
   echo "Stderr log: $LOGFILE"
-  echo "Prompt via stdin (first 300 chars):"
-  echo "${PROMPT:0:300}"
+  echo "Prompt (first 400 chars):"
+  echo "${PROMPT:0:400}"
   exit 0
 fi
 
 # --- dispatch ---
-# feed prompt via stdin (heredoc equivalent)
-if [[ $RESUME -eq 1 ]]; then
-  # resume takes prompt on stdin
-  printf '%s\n' "$PROMPT" | "${CMD[@]}" 2>>"$LOGFILE"
-else
-  # fresh call: prompt as positional via stdin redirection
-  printf '%s\n' "$PROMPT" | "${CMD[@]}" - 2>>"$LOGFILE"
-fi
+# fresh and resume both feed prompt via stdin
+printf '%s\n' "$PROMPT" | "${CMD[@]}" 2>>"$LOGFILE"
 EXIT_CODE=$?
 
 if [[ $SHOW_STDERR -eq 1 ]] || [[ $EXIT_CODE -ne 0 ]]; then

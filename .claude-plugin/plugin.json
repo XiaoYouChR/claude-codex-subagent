@@ -1,7 +1,7 @@
 {
   "name": "claude-codex-subagent",
-  "version": "1.0.0",
-  "description": "Delegate expensive work (web search, large reads, long writes, bulk analysis) to the local Codex CLI as a worker subagent. Claude orchestrates, Codex burns its own context. Adaptive sandbox, no approval prompts, thin-forwarder contract.",
+  "version": "2.0.0-fork",
+  "description": "Hand off code-writing to the local Codex CLI as a worker. Claude packages an 8-section brief; Codex implements + self-checks + emits a 5-section report; Claude verifies. Brief-declared sandbox tier: network (default) / workspace / system. No product, architecture, or scope decisions on Codex's side.",
   "author": {
     "name": "dwgx",
     "url": "https://github.com/dwgx"

@@ -1,52 +1,37 @@
 # Changelog
 
-All notable changes to this project will be documented in this file.
-
 Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 Versioning: [SemVer](https://semver.org/).
 
-## [1.0.0] — 2026-04-14
+## [2.0.0-fork] — 2026-05-23
+
+### Changed (breaking)
+
+- **Code-writer-only contract.** Claude plans + reviews; Codex implements; Claude verifies. Codex no longer makes product, architecture, or scope decisions.
+- **8-section brief schema** (Claude → Codex): Task / Scope / Sandbox tier / Constraints / Non-goals / Acceptance criteria / Self-check / Report format. Documented in `personas/code-writer.md` (Claude-facing half).
+- **5-section structured report** (Codex → Claude): Status / Files changed / Self-check / Brief mismatches / Open questions. Status is `done` / `blocked` / `partial`.
+- **Brief-declared sandbox tier.** Replaces "Claude auto-escalates per task". Three tiers:
+  - `network` — **default.** workspace writes + outbound network + codex's native web_search tool. Maps to `--dangerously-bypass-approvals-and-sandbox --config tools.web_search=true`.
+  - `workspace` — explicit downgrade. workspace writes only, no network, no web_search. Maps to `--full-auto`.
+  - `system` — anywhere on disk + network + web_search.
+- **Codex contract is split** into a Codex-facing slice (~1.5KB, between `CODEX_CONTRACT_BEGIN/END` markers) and a Claude-facing body. `scripts/codex-dispatch.sh` extracts only the contract slice and prepends it to every dispatch. Codex never sees the Claude-facing material.
+- **Mandatory verify routine.** Parse 5 report sections, spot-read changed regions, confirm self-check exit codes, surface mismatches/questions.
+- **Triage-by-cause failure loop.** Self-check failed → resume. Brief mismatch → surface. Open question → answer if obvious, else surface.
+- **`scripts/codex-dispatch.sh`** retooled: `--sandbox full-auto|bypass|read-only` replaced by `--tier network|workspace|system` (default `network`). Auto-wraps a bare task into the code-writer template if stdin doesn't start with `## Task`.
+- **`SKILL.md`** rewritten end-to-end.
+
+### Removed
+
+- `personas/reviewer.md`, `debugger.md`, `auditor.md`, `researcher.md`, `refactorer.md`. All five required judgment from Codex, which is forbidden under this contract.
 
 ### Added
-- Initial release of `claude-codex-subagent`.
-- `skills/codex-subagent/SKILL.md` — core skill teaching Claude to delegate
-  expensive work (web search, large reads, long writes, bulk analysis,
-  audits) to the local `codex exec` CLI.
-- `.claude-plugin/plugin.json` — Claude Code plugin manifest for
-  `/plugin install` users.
-- `personas/` — 5 pre-written persona templates (`reviewer`, `debugger`,
-  `auditor`, `researcher`, `refactorer`) with frontmatter, `{{TASK}}`
-  placeholder, and explicit return-format contracts.
-- `scripts/codex-dispatch.sh` — CLI wrapper for direct dispatch with
-  persona loading, sandbox/effort flags, and canonical logging pattern.
-- `scripts/doctor.sh` — health check covering Codex CLI presence, flag
-  support, shell environment, skill install location, and personas dir.
-- `scripts/sync-skill.sh` — maintainer helper for syncing
-  `~/.claude/skills/codex-subagent/SKILL.md` to/from the repo.
-- `README.md`, `INSTALL.md`, `CONTRIBUTING.md`, `LICENSE` (MIT),
-  `.gitattributes`, `.gitignore`.
-- `examples/sample-dispatches.md` — 8 real dispatch patterns you can
-  copy (web lookup, bulk analysis, long writes, audit, parallel batch,
-  resume, disagreement, rescue mode).
-- GitHub Actions CI: validates JSON manifest, SKILL.md frontmatter,
-  and runs `shellcheck` on all scripts.
-- Issue templates for bug reports and feature requests.
 
-### Design decisions captured in this release
+- `personas/code-writer.md` — the only sanctioned persona; carries both the Codex contract and the Claude-facing schema.
 
-- **Adaptive sandbox** — defaults to `--full-auto`, auto-escalates to
-  `--dangerously-bypass-approvals-and-sandbox` for network/cross-workspace
-  tasks without prompting the user. Transparency via one-line status,
-  not approval gates.
-- **Thin-forwarder contract** — Codex's stdout is authoritative. No
-  Claude-side answer editing.
-- **Stderr to temp log** — `2>>"/tmp/codex-$(openssl rand -hex 4).log"`
-  instead of `/dev/null`. Clean happy path, full debug on failure.
-- **Structured outcome classification** — `success` / `partial` / `error`
-  drives the post-dispatch decision tree.
-- **Resume-first follow-ups** — `codex exec resume --last` preferred
-  over fresh calls when context is still relevant.
-- **Zero runtime dependencies** — no Node, no Python, no MCP server.
-  Just markdown + bash.
+### Migration
 
-[1.0.0]: https://github.com/dwgx/claude-codex-subagent/releases/tag/v1.0.0
+v1 dispatches won't produce the new 5-section report. Re-author as briefs against the new 8-section schema. To stay on the generalist worker model, use upstream `dwgx/claude-codex-subagent` v1.0.0.
+
+## [1.0.0] — 2026-04-14
+
+Initial release of upstream `claude-codex-subagent`. Generalist worker. Five personas (reviewer / debugger / auditor / researcher / refactorer). Adaptive sandbox heuristic.

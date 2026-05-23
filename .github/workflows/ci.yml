@@ -57,6 +57,7 @@ jobs:
               subprocess.check_call([sys.executable, "-m", "pip", "install", "-q", "pyyaml"])
               import yaml
           bad = 0
+          found_code_writer = False
           for fn in sorted(os.listdir("personas")):
               if not fn.endswith(".md") or fn == "README.md":
                   continue
@@ -76,11 +77,26 @@ jobs:
                   if k not in fm:
                       print(f"FAIL: {path} frontmatter missing '{k}'", file=sys.stderr)
                       bad += 1
-              if "{{TASK}}" not in content:
-                  print(f"FAIL: {path} missing {{TASK}} placeholder", file=sys.stderr)
-                  bad += 1
-              else:
-                  print(f"{path}: OK")
+              if fm.get("persona") == "code-writer":
+                  found_code_writer = True
+                  # code-writer carries Codex-facing contract markers AND the
+                  # 8-section brief / 5-section report schema documentation.
+                  required_markers = ("<!-- CODEX_CONTRACT_BEGIN -->",
+                                      "<!-- CODEX_CONTRACT_END -->")
+                  required_brief = ("## Task", "## Scope", "## Sandbox tier",
+                                    "## Constraints", "## Non-goals",
+                                    "## Acceptance criteria", "## Self-check",
+                                    "## Report format")
+                  required_report = ("## Status", "## Files changed",
+                                     "## Brief mismatches", "## Open questions")
+                  for marker in required_markers + required_brief + required_report:
+                      if marker not in content:
+                          print(f"FAIL: {path} missing required marker '{marker}'", file=sys.stderr)
+                          bad += 1
+              print(f"{path}: OK")
+          if not found_code_writer:
+              print("FAIL: personas/code-writer.md must exist (the sanctioned persona)", file=sys.stderr)
+              bad += 1
           if bad:
               sys.exit(1)
           PY
