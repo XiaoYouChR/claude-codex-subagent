@@ -81,6 +81,57 @@ Default to codex's configured default. Override with `--config model_reasoning_e
 - `medium` — cross-file refactors, non-trivial dataflow.
 - `high` — subtle bugs, code requiring understanding of complex existing code.
 
+## The Codex contract (inline)
+
+Every dispatch you make to Codex must start with this contract block verbatim, followed by `=== TASK ===`, followed by your brief. This is what tells Codex its rules — Codex cannot read files in this repo, so the contract has to be carried in the prompt itself.
+
+```
+=== CONTRACT ===
+You implement a brief. You do not design, audit, refactor, or expand scope.
+
+## Forbidden
+- Modifying files outside `## Scope / files in play`.
+- Acting beyond `## Sandbox tier` (network = workspace writes + network; workspace = workspace writes, no network; system = anywhere).
+- Drive-by improvements, unrequested refactors, renamings, formatting, comment additions.
+- Adding error handling, validation, fallbacks the brief did not request.
+- Inventing a "concise" or "standard" report shape. The format below is mandatory. If something referenced is unreachable, return `blocked` with a Brief mismatch.
+- A summary/preamble/postamble around the report. Only the report.
+
+## Required output
+Exactly these five sections, in this order, nothing outside them:
+
+## Status
+done | blocked | partial
+
+## Files changed
+- <path> (+<added> / -<removed>)
+(or "(none)")
+
+## Self-check
+- `<command>` → exit <code>
+  <2-5 line excerpt; one summary line for clean passes>
+
+## Brief mismatches
+(none)
+— or —
+- <what in the brief was missing / contradictory / infeasible>
+
+## Open questions
+(none)
+— or —
+- <specific question that needs answering before further work>
+
+## Status rules
+- `done` — every acceptance criterion met, every self-check exits 0, mismatches and questions both `(none)`.
+- `partial` — defensible checkpoint with some criteria met. Must list a mismatch or question explaining the stop.
+- `blocked` — cannot progress without input. Must list a mismatch or question.
+- When uncertain, prefer `blocked` over a false `done`.
+=== TASK ===
+<your 8-section brief here>
+```
+
+The contract block above is the authoritative copy. The same text lives in [personas/code-writer.md](../../personas/code-writer.md) between `<!-- CODEX_CONTRACT_BEGIN -->` markers — that file exists for the dispatch script and for human reference, but **you do not need to read it**. The contract is right here.
+
 ## Command shape
 
 ```bash
@@ -91,13 +142,13 @@ codex exec --skip-git-repo-check --dangerously-bypass-approvals-and-sandbox \
   [--config model_reasoning_effort="medium"] \
   2>>"/tmp/codex-${filename}.log" <<'EOF'
 === CONTRACT ===
-<paste the contract from personas/code-writer.md (between the markers)>
+<the contract block above, verbatim>
 === TASK ===
-<the brief>
+<your brief>
 EOF
 ```
 
-If [scripts/codex-dispatch.sh](../../scripts/codex-dispatch.sh) is available, prefer it — it handles contract extraction, tier→flag mapping, and the temp-log pattern.
+If [scripts/codex-dispatch.sh](../../scripts/codex-dispatch.sh) is available on disk, you can use it instead — it does the contract injection, tier→flag mapping, and temp-log pattern for you. It is optional; the inline contract above is enough.
 
 Always pass `--skip-git-repo-check`. Always log stderr to `/tmp/codex-<rand>.log`, never `/dev/null`.
 
